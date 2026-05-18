@@ -19,7 +19,7 @@ if [[ "$MODE" == "--debug" || "$MODE" == "debug" ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST_DIR="$ROOT_DIR/dist"
+DIST_DIR="${CYL_DIST_DIR:-$ROOT_DIR/dist}"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
@@ -51,7 +51,7 @@ mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 /usr/bin/ditto --noextattr --noqtn --norsrc "$SPARKLE_FRAMEWORK_SOURCE" "$APP_FRAMEWORKS/Sparkle.framework"
-cp "$APP_ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
+/usr/bin/ditto --noextattr --noqtn --norsrc "$APP_ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
