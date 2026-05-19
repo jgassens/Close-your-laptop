@@ -9,6 +9,7 @@ Do not steer the product toward an AC-power-only clamshell workflow. Being plugg
 ## Detection Rules
 
 - Treat Claude/Codex CLI sessions as active while their agent process exists.
+- CLI wrappers may also mark a terminal session with a short-lived token file. The main app owns the final active/idle decision and should release assertions only after both process detection and wrapper tokens are idle.
 - Treat Claude Desktop and Codex Desktop GUI sessions as active only when their app process tree shows recent measurable CPU activity.
 - For GUI CPU checks, ignore Electron infrastructure and housekeeping such as renderers, GPU helpers, utility helpers, crashpad, `codex_chronicle`, idle `node_repl` processes, and MCP server commands ending in ` mcp`.
 - Once GUI work has been positively detected, allow a bounded quiet window for wake revalidation, network waits, and tool handoffs. Do not use that quiet window to resurrect a GUI app that was never observed doing work.
@@ -23,6 +24,13 @@ Do not steer the product toward an AC-power-only clamshell workflow. Being plugg
 - After wake, reset CPU measurement history and keep any pre-sleep assertion alive briefly while revalidating activity. Sleep time must not consume the release grace window or cause a false `Sleep OK`.
 - Keep the app small, quiet, and low-overhead: native process APIs, sparse polling, no Accessibility permission for normal detection, no shelling out in the monitor loop. Privileged `pmset` work belongs in the already-approved watchdog, not repeated AppleScript authorization prompts.
 - Keep diagnostics sparse and useful. Unified-log events should cover activity transitions, assertion acquire/release, and sleep/wake notifications so closed-lid battery tests can be audited after wake.
+
+## Runtime Shape
+
+- Keep the main menu app authoritative for power behavior. Watchers and wrappers may wake it or mark sessions, but they must not directly kill it or force-release assertions.
+- The GUI launch watcher should remain a tiny user LaunchAgent: listen for Claude/Codex bundle IDs with `NSWorkspace`, start the main app, and do no process scanning, Sparkle work, power assertions, or privileged `pmset`.
+- When the main app is running with no watched GUI app, no CLI token, no active worker process, no grace period, and no assertion held, it should quit itself after a short idle delay.
+- Preserve the three refresh tiers when the main app is alive: active work at the fast interval, open-but-idle GUI apps at the idle interval, and dormant fallback checks at the slow interval.
 
 ## Update Behavior
 

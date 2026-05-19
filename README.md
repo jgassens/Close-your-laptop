@@ -54,6 +54,28 @@ The goal is:
 
 That makes false positives costly, so the detector prefers to let an idle GUI app sleep rather than hold the Mac awake just because Claude or Codex is still open.
 
+## Low-Overhead Launching
+
+Close Your Laptop can run as an ephemeral helper instead of a permanent menu-bar resident.
+
+- Terminal workflows can use lightweight `codex` and `claude` wrappers that mark a CLI session, start the app, and remove the session marker when the command exits.
+- GUI workflows can use a tiny LaunchAgent watcher that listens for Claude Desktop and Codex Desktop launch events, then starts the main app.
+- The watcher does not scan processes, hold power assertions, use Sparkle, or ask for administrator approval.
+- The main app still owns all sleep decisions and quits itself after Claude/Codex apps, CLI sessions, active workers, and grace periods are gone.
+
+Local setup helpers:
+
+```bash
+./script/install_cli_wrappers.sh
+./script/install_watcher.sh
+```
+
+Remove the GUI watcher:
+
+```bash
+./script/uninstall_watcher.sh
+```
+
 ## Menu Bar
 
 The menu bar item shows:

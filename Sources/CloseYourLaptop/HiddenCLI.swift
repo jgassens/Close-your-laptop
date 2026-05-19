@@ -15,6 +15,13 @@ enum HiddenCLI {
         case "--scan-twice":
             runScan(twice: true)
             return EXIT_SUCCESS
+        case "--session-begin":
+            return runSessionBegin(arguments: Array(args.dropFirst()))
+        case "--session-end":
+            return runSessionEnd(arguments: Array(args.dropFirst()))
+        case "--session-list":
+            runSessionList()
+            return EXIT_SUCCESS
         case "--update-diagnostics":
             runUpdateDiagnostics(json: args.contains("--json"))
             return EXIT_SUCCESS
@@ -39,11 +46,83 @@ enum HiddenCLI {
             Thread.sleep(forTimeInterval: 2)
         }
 
-        let report = AgentDetector.report(from: scanner.scan())
+        let report = activityReport(from: scanner.scan(), cliSessions: AgentSessionTokenStore().activeSessions())
         print(report.summary)
 
         for session in report.sessions {
             print("\(session.kind.displayName) pid=\(session.root.pid) processes=\(session.processCount)")
+        }
+    }
+
+    private static func activityReport(
+        from processes: [ProcessSnapshot],
+        cliSessions: [AgentSessionToken]
+    ) -> AgentActivityReport {
+        var sessions = AgentDetector.report(from: processes).sessions
+        let detectedKinds = Set(sessions.map(\.kind))
+        sessions.append(contentsOf: cliSessions
+            .filter { !detectedKinds.contains($0.kind) }
+            .map { session in
+                AgentSession(
+                    kind: session.kind,
+                    root: ProcessSnapshot(
+                        pid: session.pid,
+                        parentPID: 1,
+                        cpuPercent: 0,
+                        state: "token",
+                        command: "Close Your Laptop CLI session \(session.id)"
+                    ),
+                    descendants: []
+                )
+            })
+        return AgentActivityReport(sessions: sessions)
+    }
+
+    private static func runSessionBegin(arguments: [String]) -> Int32 {
+        let parsed = ParsedArguments(arguments)
+        guard let kindRaw = parsed.value(after: "--kind"),
+              let kind = AgentKind(rawValue: kindRaw),
+              let token = parsed.value(after: "--token") else {
+            fputs("missing --kind or --token\n", stderr)
+            return EXIT_FAILURE
+        }
+
+        let pid = parsed.value(after: "--pid").flatMap(Int32.init) ?? Int32(ProcessInfo.processInfo.processIdentifier)
+
+        do {
+            try AgentSessionTokenStore().begin(kind: kind, token: token, pid: pid)
+            return EXIT_SUCCESS
+        } catch {
+            fputs("session begin failed: \(error.localizedDescription)\n", stderr)
+            return EXIT_FAILURE
+        }
+    }
+
+    private static func runSessionEnd(arguments: [String]) -> Int32 {
+        let parsed = ParsedArguments(arguments)
+        guard let token = parsed.value(after: "--token") else {
+            fputs("missing --token\n", stderr)
+            return EXIT_FAILURE
+        }
+
+        do {
+            try AgentSessionTokenStore().end(token: token)
+            return EXIT_SUCCESS
+        } catch {
+            fputs("session end failed: \(error.localizedDescription)\n", stderr)
+            return EXIT_FAILURE
+        }
+    }
+
+    private static func runSessionList() {
+        let sessions = AgentSessionTokenStore().activeSessions()
+        if sessions.isEmpty {
+            print("No active CLI sessions.")
+            return
+        }
+
+        for session in sessions {
+            print("\(session.kind.rawValue) token=\(session.id) pid=\(session.pid)")
         }
     }
 

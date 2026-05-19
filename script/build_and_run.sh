@@ -5,6 +5,7 @@ MODE="${1:-run}"
 EXTRA_ARGS=("${@:2}")
 APP_NAME="Close Your Laptop"
 PRODUCT_NAME="CloseYourLaptop"
+WATCHER_PRODUCT_NAME="CloseYourLaptopWatcher"
 BUNDLE_ID="com.gassensmith.closeyourlaptop"
 MIN_SYSTEM_VERSION="13.0"
 CONFIGURATION="release"
@@ -26,6 +27,7 @@ APP_MACOS="$APP_CONTENTS/MacOS"
 APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$PRODUCT_NAME"
+WATCHER_BINARY="$APP_RESOURCES/$WATCHER_PRODUCT_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
 
@@ -33,8 +35,11 @@ cd "$ROOT_DIR"
 
 pkill -x "$PRODUCT_NAME" >/dev/null 2>&1 || true
 
-swift build -c "$CONFIGURATION"
-BUILD_BINARY="$(swift build -c "$CONFIGURATION" --show-bin-path)/$PRODUCT_NAME"
+swift build -c "$CONFIGURATION" --product "$PRODUCT_NAME"
+swift build -c "$CONFIGURATION" --product "$WATCHER_PRODUCT_NAME"
+BUILD_BIN_PATH="$(swift build -c "$CONFIGURATION" --show-bin-path)"
+BUILD_BINARY="$BUILD_BIN_PATH/$PRODUCT_NAME"
+BUILD_WATCHER_BINARY="$BUILD_BIN_PATH/$WATCHER_PRODUCT_NAME"
 SPARKLE_FRAMEWORK_SOURCE="$(find "$ROOT_DIR/.build/artifacts/sparkle/Sparkle" -path '*/macos-arm64_x86_64/Sparkle.framework' -type d | head -n 1)"
 
 if [[ -z "$SPARKLE_FRAMEWORK_SOURCE" ]]; then
@@ -50,6 +55,8 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_FRAMEWORKS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+/usr/bin/ditto --noextattr --noqtn --norsrc "$BUILD_WATCHER_BINARY" "$WATCHER_BINARY"
+chmod +x "$WATCHER_BINARY"
 /usr/bin/ditto --noextattr --noqtn --norsrc "$SPARKLE_FRAMEWORK_SOURCE" "$APP_FRAMEWORKS/Sparkle.framework"
 /usr/bin/ditto --noextattr --noqtn --norsrc "$APP_ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
 

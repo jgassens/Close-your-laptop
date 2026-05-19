@@ -4,6 +4,7 @@ import OSLog
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let scanner = ProcessScanner()
+    private let cliSessionStore = AgentSessionTokenStore()
     private let powerController = PowerAssertionController()
     private let updateController = UpdateController()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -22,13 +23,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var postWakeRevalidationUntil: Date?
     private var wasHoldingAssertionsAtSleep = false
     private var isHoldingForGracePeriod = false
+    private var activeCLISessions: [AgentSessionToken] = []
+    private var automaticQuitCandidateSince: Date?
+    private let launchDate = Date()
 
     private let releaseGraceSeconds: TimeInterval = 30
     private let desktopReleaseGraceSeconds: TimeInterval = 120
     private let postWakeRevalidationSeconds: TimeInterval = 120
     private let activeRefreshSeconds: TimeInterval = 5
     private let idleRefreshSeconds: TimeInterval = 15
+    private let dormantRefreshSeconds: TimeInterval = 60
+    private let automaticQuitDelaySeconds: TimeInterval = 20
+    private let watchedBundleIDs: Set<String> = [
+        "com.openai.codex",
+        "com.anthropic.claudefordesktop"
+    ]
     private let monitoringKey = "monitoringEnabled"
+
+    private var automaticQuitEnabled: Bool {
+        ProcessInfo.processInfo.environment["CYL_DISABLE_AUTO_QUIT"] != "1"
+    }
 
     private lazy var awakeImage = templateImage(named: "bolt.fill", accessibilityDescription: "Keeping Mac awake")
     private lazy var sleepImage = templateImage(named: "moon.zzz", accessibilityDescription: "Allowing sleep")
@@ -49,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         logger.notice("app launched")
         updateController.start()
-        configureSleepNotifications()
+        configureWorkspaceNotifications()
         configureStatusItem()
         primeCPUHistoryThenRefresh()
     }
@@ -83,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     }
 
-    private func configureSleepNotifications() {
+    private func configureWorkspaceNotifications() {
         let notificationCenter = NSWorkspace.shared.notificationCenter
         notificationCenter.addObserver(
             self,
@@ -95,6 +109,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(systemDidWake),
             name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(agentAppDidLaunch),
+            name: NSWorkspace.didLaunchApplicationNotification,
+            object: nil
+        )
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(agentAppDidTerminate),
+            name: NSWorkspace.didTerminateApplicationNotification,
             object: nil
         )
     }
@@ -137,17 +163,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
     }
 
+    @objc private func agentAppDidLaunch(_ notification: Notification) {
+        guard let app = watchedApplication(from: notification) else {
+            return
+        }
+
+        logger.notice(
+            "agent app launched; bundleID=\(app.bundleIdentifier ?? "unknown", privacy: .public)"
+        )
+        primeCPUHistoryThenRefresh()
+    }
+
+    @objc private func agentAppDidTerminate(_ notification: Notification) {
+        guard let app = watchedApplication(from: notification) else {
+            return
+        }
+
+        logger.notice(
+            "agent app terminated; bundleID=\(app.bundleIdentifier ?? "unknown", privacy: .public)"
+        )
+        refresh()
+    }
+
     private func refresh() {
         if monitoringEnabled {
             let processes = scanner.scan()
-            lastReport = AgentDetector.report(from: processes)
+            activeCLISessions = cliSessionStore.activeSessions()
+            lastReport = activityReport(from: processes, cliSessions: activeCLISessions)
         } else {
+            activeCLISessions = []
             lastReport = AgentActivityReport(sessions: [])
         }
 
         updatePowerState()
         updateStatusItem()
+        updateAutomaticQuitCandidate()
         scheduleNextRefresh()
+        quitAutomaticallyIfReady()
+    }
+
+    private func activityReport(
+        from processes: [ProcessSnapshot],
+        cliSessions: [AgentSessionToken]
+    ) -> AgentActivityReport {
+        var sessions = AgentDetector.report(from: processes).sessions
+        let detectedKinds = Set(sessions.map(\.kind))
+        let syntheticSessions = cliSessions
+            .filter { !detectedKinds.contains($0.kind) }
+            .map { session in
+                AgentSession(
+                    kind: session.kind,
+                    root: ProcessSnapshot(
+                        pid: session.pid,
+                        parentPID: 1,
+                        cpuPercent: 0,
+                        state: "token",
+                        command: "Close Your Laptop CLI session \(session.id)"
+                    ),
+                    descendants: []
+                )
+            }
+
+        sessions.append(contentsOf: syntheticSessions)
+        return AgentActivityReport(sessions: sessions)
     }
 
     private func updatePowerState() {
@@ -241,9 +319,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let interval = (lastReport.isActive || isHoldingForGracePeriod || postWakeRevalidationUntil != nil)
-            ? activeRefreshSeconds
-            : idleRefreshSeconds
+        let interval: TimeInterval
+        if lastReport.isActive || isHoldingForGracePeriod || postWakeRevalidationUntil != nil {
+            interval = activeRefreshSeconds
+        } else if isWatchedAppRunning {
+            interval = idleRefreshSeconds
+        } else if automaticQuitCandidateSince != nil {
+            interval = min(automaticQuitDelaySeconds, dormantRefreshSeconds)
+        } else {
+            interval = dormantRefreshSeconds
+        }
+
         guard timer == nil || currentRefreshInterval != interval else {
             return
         }
@@ -342,6 +428,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return "Rechecking Claude/Codex after wake."
         }
 
+        if !isWatchedAppRunning && activeCLISessions.isEmpty {
+            return "No Claude or Codex apps or CLI sessions are running."
+        }
+
+        if isWatchedAppRunning {
+            return "Claude or Codex is open, but no work is active."
+        }
+
         return "No Claude or Codex work is active."
     }
 
@@ -362,7 +456,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return "release-grace"
         }
 
+        if !isWatchedAppRunning && activeCLISessions.isEmpty {
+            return "dormant"
+        }
+
+        if isWatchedAppRunning {
+            return "idle-gui"
+        }
+
         return "idle"
+    }
+
+    private var isWatchedAppRunning: Bool {
+        NSWorkspace.shared.runningApplications.contains { app in
+            guard let bundleIdentifier = app.bundleIdentifier else {
+                return false
+            }
+
+            return watchedBundleIDs.contains(bundleIdentifier)
+        }
+    }
+
+    private func watchedApplication(from notification: Notification) -> NSRunningApplication? {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleIdentifier = app.bundleIdentifier,
+              watchedBundleIDs.contains(bundleIdentifier) else {
+            return nil
+        }
+
+        return app
+    }
+
+    private func updateAutomaticQuitCandidate(now: Date = Date()) {
+        guard shouldQuitAutomatically else {
+            automaticQuitCandidateSince = nil
+            return
+        }
+
+        if automaticQuitCandidateSince == nil {
+            automaticQuitCandidateSince = now
+            logger.notice(
+                "automatic idle quit pending; seconds=\(self.automaticQuitDelaySeconds, privacy: .public)"
+            )
+        }
+    }
+
+    private var shouldQuitAutomatically: Bool {
+        automaticQuitEnabled &&
+            monitoringEnabled &&
+            !isWatchedAppRunning &&
+            activeCLISessions.isEmpty &&
+            !lastReport.isActive &&
+            !isHoldingForGracePeriod &&
+            postWakeRevalidationUntil == nil &&
+            !powerController.isHoldingAssertions
+    }
+
+    private func quitAutomaticallyIfReady(now: Date = Date()) {
+        guard let automaticQuitCandidateSince,
+              now.timeIntervalSince(automaticQuitCandidateSince) >= automaticQuitDelaySeconds,
+              now.timeIntervalSince(launchDate) >= automaticQuitDelaySeconds else {
+            return
+        }
+
+        logger.notice("automatic idle quit")
+        NSApp.terminate(nil)
     }
 
     private func logActivityStateIfNeeded() {

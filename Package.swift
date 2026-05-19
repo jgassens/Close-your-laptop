@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "CloseYourLaptop", targets: ["CloseYourLaptop"])
+        .executable(name: "CloseYourLaptop", targets: ["CloseYourLaptop"]),
+        .executable(name: "CloseYourLaptopWatcher", targets: ["CloseYourLaptopWatcher"])
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.1")
@@ -28,6 +29,13 @@ let package = Package(
                     "-Xlinker", "-rpath",
                     "-Xlinker", "@executable_path/../Frameworks"
                 ])
+            ]
+        ),
+        .executableTarget(
+            name: "CloseYourLaptopWatcher",
+            dependencies: [],
+            linkerSettings: [
+                .linkedFramework("AppKit")
             ]
         ),
         .testTarget(
