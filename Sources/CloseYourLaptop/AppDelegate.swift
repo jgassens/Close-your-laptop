@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let cliSessionStore = AgentSessionTokenStore()
     private let powerController = PowerAssertionController()
     private let updateController = UpdateController()
+    private let watcherController = WatcherController()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.gassensmith.closeyourlaptop",
@@ -85,6 +86,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func refreshFromMenu() {
         logger.info("manual refresh requested")
         refresh()
+    }
+
+    @objc private func installTinyPersistentWatcher() {
+        do {
+            try watcherController.install()
+            logger.notice("tiny persistent watcher installed")
+            showAlert(
+                title: "Tiny Persistent Watcher Installed",
+                message: "Close Your Laptop will now start automatically when Claude or Codex opens."
+            )
+            updateStatusItem(force: true)
+        } catch {
+            logger.error("tiny persistent watcher install failed; error=\(error.localizedDescription, privacy: .public)")
+            showAlert(title: "Could Not Install Watcher", message: error.localizedDescription)
+        }
+    }
+
+    @objc private func uninstallTinyPersistentWatcher() {
+        do {
+            try watcherController.uninstall()
+            logger.notice("tiny persistent watcher uninstalled")
+            showAlert(
+                title: "Tiny Persistent Watcher Uninstalled",
+                message: "Close Your Laptop will no longer start automatically when Claude or Codex opens."
+            )
+            updateStatusItem(force: true)
+        } catch {
+            logger.error("tiny persistent watcher uninstall failed; error=\(error.localizedDescription, privacy: .public)")
+            showAlert(title: "Could Not Uninstall Watcher", message: error.localizedDescription)
+        }
     }
 
     @objc private func quit() {
@@ -278,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func updateStatusItem() {
+    private func updateStatusItem(force: Bool = false) {
         let state = RenderedState(
             monitoringEnabled: monitoringEnabled,
             isHoldingAssertions: powerController.isHoldingAssertions,
@@ -286,12 +317,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             detailLine: detailLine,
             powerError: powerController.lastErrorDescription,
             clamshellLine: powerController.clamshellStatusLine,
+            watcherInstalled: watcherController.isInstalled,
             sessionLines: lastReport.sessions.map { session in
                 "\(session.kind.displayName) PID \(session.root.pid), \(session.processCount) process\(session.processCount == 1 ? "" : "es")"
             }
         )
 
-        guard state != lastRenderedState else {
+        guard force || state != lastRenderedState else {
             return
         }
 
@@ -377,6 +409,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshFromMenu), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
+
+        let watcherItem = NSMenuItem(title: "Tiny Persistent Watcher", action: nil, keyEquivalent: "")
+        let watcherMenu = NSMenu(title: "Tiny Persistent Watcher")
+        let installItem = NSMenuItem(
+            title: "Install",
+            action: #selector(installTinyPersistentWatcher),
+            keyEquivalent: ""
+        )
+        installItem.target = self
+        installItem.isEnabled = !state.watcherInstalled
+        watcherMenu.addItem(installItem)
+
+        let uninstallItem = NSMenuItem(
+            title: "Uninstall",
+            action: #selector(uninstallTinyPersistentWatcher),
+            keyEquivalent: ""
+        )
+        uninstallItem.target = self
+        uninstallItem.isEnabled = state.watcherInstalled
+        watcherMenu.addItem(uninstallItem)
+
+        watcherItem.submenu = watcherMenu
+        menu.addItem(watcherItem)
 
         addDisabledItem(title: "Battery-first: sleep is allowed as soon as work stops.", to: menu)
 
@@ -538,6 +593,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.isEnabled = false
         menu.addItem(item)
     }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
 }
 
 private struct RenderedState: Equatable {
@@ -547,5 +612,6 @@ private struct RenderedState: Equatable {
     let detailLine: String
     let powerError: String?
     let clamshellLine: String?
+    let watcherInstalled: Bool
     let sessionLines: [String]
 }

@@ -65,15 +65,15 @@ Close Your Laptop can run as an ephemeral helper instead of a permanent menu-bar
 
 Local setup helpers:
 
+Use the menu bar item:
+
+- `Tiny Persistent Watcher` > `Install`
+- `Tiny Persistent Watcher` > `Uninstall`
+
+The CLI helpers remain available for development and terminal-wrapper setup:
+
 ```bash
 ./script/install_cli_wrappers.sh
-./script/install_watcher.sh
-```
-
-Remove the GUI watcher:
-
-```bash
-./script/uninstall_watcher.sh
 ```
 
 ## Menu Bar
