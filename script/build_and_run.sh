@@ -104,11 +104,22 @@ cat >"$INFO_PLIST" <<PLIST
 PLIST
 
 /usr/bin/xattr -cr "$APP_BUNDLE"
-CODESIGN_FLAGS=(--force --deep --sign "$CODESIGN_IDENTITY")
+CODESIGN_FLAGS=(--force --sign "$CODESIGN_IDENTITY")
 if [[ "${CYL_HARDENED_RUNTIME:-0}" == "1" ]]; then
   CODESIGN_FLAGS+=(--options runtime)
 fi
-/usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$APP_BUNDLE"
+if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+  CODESIGN_FLAGS+=(--timestamp)
+fi
+/usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$WATCHER_BINARY"
+APP_CODESIGN_FLAGS=(--force --deep --sign "$CODESIGN_IDENTITY")
+if [[ "${CYL_HARDENED_RUNTIME:-0}" == "1" ]]; then
+  APP_CODESIGN_FLAGS+=(--options runtime)
+fi
+if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+  APP_CODESIGN_FLAGS+=(--timestamp)
+fi
+/usr/bin/codesign "${APP_CODESIGN_FLAGS[@]}" "$APP_BUNDLE"
 /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
 
 open_app() {
