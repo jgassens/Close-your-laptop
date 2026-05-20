@@ -15,6 +15,15 @@ UPDATE_FEED_URL="${CYL_UPDATE_FEED_URL:-https://jgassens.github.io/close-your-la
 SPARKLE_PUBLIC_KEY="${CYL_SPARKLE_PUBLIC_KEY:-HK2FMFt1/JlsEm52nLZ7X4cXo1nmLLJpAoRzB3y7tYQ=}"
 CODESIGN_IDENTITY="${CYL_CODESIGN_IDENTITY:--}"
 
+if [[ "$CODESIGN_IDENTITY" != "-" && "${CYL_SIGNING_IDENTITY_PRIVACY_APPROVED:-0}" != "1" ]]; then
+  cat >&2 <<'MESSAGE'
+Refusing to sign a distributable until CYL_SIGNING_IDENTITY_PRIVACY_APPROVED=1 is set.
+Verify the selected Developer ID identity is organization-owned or otherwise privacy-safe first.
+Individual Developer ID identities can surface legal names in macOS security and background-item UI.
+MESSAGE
+  exit 1
+fi
+
 if [[ "$MODE" == "--debug" || "$MODE" == "debug" ]]; then
   CONFIGURATION="debug"
 fi
@@ -33,7 +42,11 @@ APP_ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
 
 cd "$ROOT_DIR"
 
-pkill -x "$PRODUCT_NAME" >/dev/null 2>&1 || true
+case "$MODE" in
+  run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify)
+    pkill -x "$PRODUCT_NAME" >/dev/null 2>&1 || true
+    ;;
+esac
 
 swift build -c "$CONFIGURATION" --product "$PRODUCT_NAME"
 swift build -c "$CONFIGURATION" --product "$WATCHER_PRODUCT_NAME"
@@ -111,8 +124,17 @@ fi
 if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
   CODESIGN_FLAGS+=(--timestamp)
 fi
+
+if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+  /usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$APP_FRAMEWORKS/Sparkle.framework/Versions/B/Autoupdate"
+  /usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$APP_FRAMEWORKS/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc"
+  /usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$APP_FRAMEWORKS/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
+  /usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$APP_FRAMEWORKS/Sparkle.framework/Versions/B/Updater.app"
+  /usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$APP_FRAMEWORKS/Sparkle.framework"
+fi
+
 /usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$WATCHER_BINARY"
-APP_CODESIGN_FLAGS=(--force --deep --sign "$CODESIGN_IDENTITY")
+APP_CODESIGN_FLAGS=(--force --sign "$CODESIGN_IDENTITY")
 if [[ "${CYL_HARDENED_RUNTIME:-0}" == "1" ]]; then
   APP_CODESIGN_FLAGS+=(--options runtime)
 fi

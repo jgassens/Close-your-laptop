@@ -8,6 +8,7 @@ INSTALL_DIR="$HOME/Library/Application Support/Close Your Laptop"
 WATCHER_DEST="$INSTALL_DIR/CloseYourLaptopWatcher"
 PLIST_PATH="$HOME/Library/LaunchAgents/com.gassensmith.closeyourlaptop.watcher.plist"
 LABEL="com.gassensmith.closeyourlaptop.watcher"
+APP_BUNDLE_ID="com.gassensmith.closeyourlaptop"
 UID_VALUE="$(id -u)"
 
 if [[ ! -x "$WATCHER_SOURCE" ]]; then
@@ -43,6 +44,10 @@ cat >"$PLIST_PATH" <<PLIST
     <key>CYL_APP_PATH</key>
     <string>$APP_PATH</string>
   </dict>
+  <key>AssociatedBundleIdentifiers</key>
+  <array>
+    <string>$APP_BUNDLE_ID</string>
+  </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>

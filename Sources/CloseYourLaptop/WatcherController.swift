@@ -4,6 +4,7 @@ import Foundation
 final class WatcherController {
     private let fileManager: FileManager
     private let label = "com.gassensmith.closeyourlaptop.watcher"
+    private let appBundleIdentifier = "com.gassensmith.closeyourlaptop"
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -70,6 +71,7 @@ final class WatcherController {
             "EnvironmentVariables": [
                 "CYL_APP_PATH": appBundleURL.path
             ],
+            "AssociatedBundleIdentifiers": [appBundleIdentifier],
             "RunAtLoad": true,
             "KeepAlive": [
                 "SuccessfulExit": false

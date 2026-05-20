@@ -39,3 +39,10 @@ Do not steer the product toward an AC-power-only clamshell workflow. Being plugg
 - Keep `CFBundleVersion` monotonic and set `CFBundleShortVersionString` for the user-facing version. Sparkle compares appcast `sparkle:version` against `CFBundleVersion`.
 - The hidden CLI/debug surface may expose update diagnostics, signing-tool paths, appcast checks, and appcast template generation. Keep that surface out of user-facing menu/UI copy.
 - Publish brief release summaries in the appcast item description or release notes link so Sparkle's prompt explains the change.
+
+## Privacy and Signing
+
+- Do not create public signed or notarized artifacts with an individual Developer ID identity that can surface the maintainer's legal name in macOS security, background-item, Gatekeeper, or signing UI.
+- If only individual/personally named Developer ID identities are installed, stop before signing/notarizing and ask for an organization or otherwise privacy-safe Developer ID certificate.
+- Before any release signing, verify the displayed signing identity and treat `CYL_SIGNING_IDENTITY_PRIVACY_APPROVED=1` as a deliberate release gate, not a convenience flag.
+- Keep `AssociatedBundleIdentifiers = com.gassensmith.closeyourlaptop` in every LaunchAgent install path so macOS associates the watcher with the app instead of generic developer-name software.

@@ -64,6 +64,7 @@ private final class Watcher {
 
     private func startSidecar() {
         guard NSRunningApplication.runningApplications(withBundleIdentifier: sidecarBundleID).isEmpty else {
+            logger.notice("sidecar already running")
             return
         }
 
