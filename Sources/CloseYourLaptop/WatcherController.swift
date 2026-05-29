@@ -10,9 +10,28 @@ final class WatcherController {
         self.fileManager = fileManager
     }
 
-    var isInstalled: Bool {
-        fileManager.fileExists(atPath: plistURL.path) &&
-            fileManager.isExecutableFile(atPath: installedWatcherURL.path)
+    func installationState(appBundleURL: URL = Bundle.main.bundleURL) -> WatcherInstallationState {
+        let plistExists = fileManager.fileExists(atPath: plistURL.path)
+        let watcherInstalled = fileManager.isExecutableFile(atPath: installedWatcherURL.path)
+
+        guard plistExists || watcherInstalled else {
+            return .notInstalled(canInstall: canInstall(from: appBundleURL))
+        }
+
+        guard plistExists && watcherInstalled else {
+            return .stale(canUpdate: canInstall(from: appBundleURL))
+        }
+
+        guard let bundledWatcherURL = bundledWatcherURL else {
+            return .stale(canUpdate: false)
+        }
+
+        guard launchAgentAppPath == appBundleURL.standardizedFileURL.path,
+              watcherBinaryMatchesBundledWatcher(bundledWatcherURL) else {
+            return .stale(canUpdate: canInstall(from: appBundleURL))
+        }
+
+        return .current
     }
 
     func install(appBundleURL: URL = Bundle.main.bundleURL) throws {
@@ -20,10 +39,7 @@ final class WatcherController {
             throw WatcherError.appNotInApplications
         }
 
-        guard let bundledWatcherURL = Bundle.main.url(
-            forResource: "CloseYourLaptopWatcher",
-            withExtension: nil
-        ) else {
+        guard let bundledWatcherURL else {
             throw WatcherError.missingBundledWatcher
         }
 
@@ -141,6 +157,45 @@ final class WatcherController {
         launchAgentsDirectoryURL
             .appendingPathComponent("\(label).plist", isDirectory: false)
     }
+
+    private var bundledWatcherURL: URL? {
+        Bundle.main.url(
+            forResource: "CloseYourLaptopWatcher",
+            withExtension: nil
+        )
+    }
+
+    private func canInstall(from appBundleURL: URL) -> Bool {
+        appBundleURL.standardizedFileURL.path.hasPrefix("/Applications/") &&
+            bundledWatcherURL != nil
+    }
+
+    private var launchAgentAppPath: String? {
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let dictionary = plist as? [String: Any],
+              let environment = dictionary["EnvironmentVariables"] as? [String: Any],
+              let path = environment["CYL_APP_PATH"] as? String else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private func watcherBinaryMatchesBundledWatcher(_ bundledWatcherURL: URL) -> Bool {
+        guard let installedData = try? Data(contentsOf: installedWatcherURL),
+              let bundledData = try? Data(contentsOf: bundledWatcherURL) else {
+            return false
+        }
+
+        return installedData == bundledData
+    }
+}
+
+enum WatcherInstallationState: Equatable {
+    case notInstalled(canInstall: Bool)
+    case stale(canUpdate: Bool)
+    case current
 }
 
 enum WatcherError: LocalizedError {

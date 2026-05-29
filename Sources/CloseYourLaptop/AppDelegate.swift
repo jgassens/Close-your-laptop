@@ -103,6 +103,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func updateTinyPersistentWatcher() {
+        do {
+            try watcherController.install()
+            logger.notice("tiny persistent watcher updated")
+            showAlert(
+                title: "Tiny Persistent Watcher Updated",
+                message: "The installed watcher now matches this copy of Close Your Laptop."
+            )
+            updateStatusItem(force: true)
+        } catch {
+            logger.error("tiny persistent watcher update failed; error=\(error.localizedDescription, privacy: .public)")
+            showAlert(title: "Could Not Update Watcher", message: error.localizedDescription)
+        }
+    }
+
     @objc private func uninstallTinyPersistentWatcher() {
         do {
             try watcherController.uninstall()
@@ -317,7 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             detailLine: detailLine,
             powerError: powerController.lastErrorDescription,
             clamshellLine: powerController.clamshellStatusLine,
-            watcherInstalled: watcherController.isInstalled,
+            watcherState: watcherController.installationState(),
             sessionLines: lastReport.sessions.map { session in
                 "\(session.kind.displayName) PID \(session.root.pid), \(session.processCount) process\(session.processCount == 1 ? "" : "es")"
             }
@@ -412,23 +427,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let watcherItem = NSMenuItem(title: "Tiny Persistent Watcher", action: nil, keyEquivalent: "")
         let watcherMenu = NSMenu(title: "Tiny Persistent Watcher")
-        let installItem = NSMenuItem(
-            title: "Install",
-            action: #selector(installTinyPersistentWatcher),
-            keyEquivalent: ""
-        )
-        installItem.target = self
-        installItem.isEnabled = !state.watcherInstalled
-        watcherMenu.addItem(installItem)
-
-        let uninstallItem = NSMenuItem(
-            title: "Uninstall",
-            action: #selector(uninstallTinyPersistentWatcher),
-            keyEquivalent: ""
-        )
-        uninstallItem.target = self
-        uninstallItem.isEnabled = state.watcherInstalled
-        watcherMenu.addItem(uninstallItem)
+        switch state.watcherState {
+        case .notInstalled(let canInstall):
+            if canInstall {
+                addWatcherAction(
+                    title: "Install",
+                    action: #selector(installTinyPersistentWatcher),
+                    to: watcherMenu
+                )
+            } else {
+                addDisabledItem(title: "Move app to Applications to install.", to: watcherMenu)
+            }
+        case .stale(let canUpdate):
+            if canUpdate {
+                addWatcherAction(
+                    title: "Update",
+                    action: #selector(updateTinyPersistentWatcher),
+                    to: watcherMenu
+                )
+            } else {
+                addDisabledItem(title: "Current app cannot update watcher.", to: watcherMenu)
+            }
+            addWatcherAction(
+                title: "Uninstall",
+                action: #selector(uninstallTinyPersistentWatcher),
+                to: watcherMenu
+            )
+        case .current:
+            addWatcherAction(
+                title: "Uninstall",
+                action: #selector(uninstallTinyPersistentWatcher),
+                to: watcherMenu
+            )
+        }
 
         watcherItem.submenu = watcherMenu
         menu.addItem(watcherItem)
@@ -594,6 +625,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item)
     }
 
+    private func addWatcherAction(title: String, action: Selector, to menu: NSMenu) {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+    }
+
     private func showAlert(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
@@ -612,6 +649,6 @@ private struct RenderedState: Equatable {
     let detailLine: String
     let powerError: String?
     let clamshellLine: String?
-    let watcherInstalled: Bool
+    let watcherState: WatcherInstallationState
     let sessionLines: [String]
 }

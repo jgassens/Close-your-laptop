@@ -67,8 +67,9 @@ Local setup helpers:
 
 Use the menu bar item:
 
-- `Tiny Persistent Watcher` > `Install`
-- `Tiny Persistent Watcher` > `Uninstall`
+- `Tiny Persistent Watcher` > `Install` appears only when the watcher is missing.
+- `Tiny Persistent Watcher` > `Update` appears only when the installed watcher or LaunchAgent does not match the current app bundle.
+- `Tiny Persistent Watcher` > `Uninstall` appears only when the watcher is installed.
 
 The CLI helpers remain available for development and terminal-wrapper setup:
 
@@ -90,6 +91,8 @@ The menu includes the current assertion state, detected Claude/Codex sessions, a
 Close Your Laptop uses [Sparkle](https://sparkle-project.org/) for automatic updates. The app checks a GitHub-hosted appcast in the background and shows Sparkle's standard update prompt when a newer signed release is available.
 
 Updates are not silently installed. The user can install or skip an offered version; if a newer version is published later, Sparkle can prompt again. Release summaries come from the appcast item so the update prompt explains what changed.
+
+Sparkle updates the main app bundle. If the tiny persistent watcher was installed separately, the app compares that helper and its LaunchAgent path against the current bundle and offers `Tiny Persistent Watcher` > `Update` when the watcher needs to be refreshed from the Sparkle-updated app.
 
 ## Build From Source
 
