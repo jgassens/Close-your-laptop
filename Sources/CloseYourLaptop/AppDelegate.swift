@@ -88,6 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
     }
 
+    @objc private func checkForUpdates() {
+        if let problem = updateController.checkForUpdates() {
+            showAlert(title: "Could Not Check for Updates", message: problem)
+        }
+    }
+
     @objc private func installTinyPersistentWatcher() {
         do {
             try watcherController.install()
@@ -424,6 +430,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshFromMenu), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
+
+        let updateItem = NSMenuItem(
+            title: "Check for Updates...",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        menu.addItem(updateItem)
 
         let watcherItem = NSMenuItem(title: "Tiny Persistent Watcher", action: nil, keyEquivalent: "")
         let watcherMenu = NSMenu(title: "Tiny Persistent Watcher")

@@ -35,7 +35,7 @@ Do not steer the product toward an AC-power-only clamshell workflow. Being plugg
 ## Update Behavior
 
 - Sparkle is the app's update mechanism. Use a GitHub-hosted appcast and signed release archive; do not replace it with manual download links.
-- Do not add a visible "Check for Updates" menu item or settings control. Updates should be automatic background checks with Sparkle's prompt when a newer version is found.
+- Include a visible "Check for Updates..." menu item that invokes Sparkle's manual update check. Updates should still use Sparkle's prompt when a newer version is found.
 - Keep `CFBundleVersion` monotonic and set `CFBundleShortVersionString` for the user-facing version. Sparkle compares appcast `sparkle:version` against `CFBundleVersion`.
 - The hidden CLI/debug surface may expose update diagnostics, signing-tool paths, appcast checks, and appcast template generation. Keep that surface out of user-facing menu/UI copy.
 - Publish brief release summaries in the appcast item description or release notes link so Sparkle's prompt explains the change.

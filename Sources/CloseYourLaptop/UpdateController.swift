@@ -30,4 +30,21 @@ final class UpdateController {
             logger.notice("sparkle updater started; feed=\(diagnostics.feedURL ?? "missing", privacy: .public)")
         }
     }
+
+    func checkForUpdates() -> String? {
+        MainActor.assumeIsolated {
+            if updaterController == nil {
+                start()
+            }
+
+            guard let updaterController else {
+                let diagnostics = UpdateDiagnostics.current()
+                return diagnostics.configurationProblem
+            }
+
+            updaterController.checkForUpdates(nil)
+            logger.notice("manual sparkle update check requested")
+            return nil
+        }
+    }
 }

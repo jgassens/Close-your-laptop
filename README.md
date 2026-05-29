@@ -84,11 +84,11 @@ The menu bar item shows:
 - `Awake` when Close Your Laptop is holding sleep assertions
 - `Sleep OK` when macOS is free to sleep
 
-The menu includes the current assertion state, detected Claude/Codex sessions, a monitoring toggle, refresh, and quit. There is intentionally no manual update-check control.
+The menu includes the current assertion state, detected Claude/Codex sessions, a monitoring toggle, refresh, Sparkle update check, and quit.
 
 ## Automatic Updates
 
-Close Your Laptop uses [Sparkle](https://sparkle-project.org/) for automatic updates. The app checks a GitHub-hosted appcast in the background and shows Sparkle's standard update prompt when a newer signed release is available.
+Close Your Laptop uses [Sparkle](https://sparkle-project.org/) for updates. The app checks a GitHub-hosted appcast in the background and shows Sparkle's standard update prompt when a newer signed release is available. The menu also includes `Check for Updates...` for a manual Sparkle check.
 
 Updates are not silently installed. The user can install or skip an offered version; if a newer version is published later, Sparkle can prompt again. Release summaries come from the appcast item so the update prompt explains what changed.
 
