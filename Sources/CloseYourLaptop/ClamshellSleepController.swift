@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import OSLog
 
 final class ClamshellSleepController {
@@ -45,14 +46,19 @@ final class ClamshellSleepController {
 
     func setEnabled(_ enabled: Bool, reason: String) {
         switch state {
-        case .ready(let token, let currentlyEnabled):
-            updateHelper(token: token, enabled: enabled)
+        case .ready(let helper, let currentlyEnabled):
+            guard helperIsHealthy(helper) else {
+                markHelperLost(helper, enabled: enabled, reason: reason)
+                return
+            }
+
+            updateHelper(helper: helper, enabled: enabled)
             if currentlyEnabled != enabled {
                 let mode = enabled ? "armed" : "disarmed"
                 logger.notice("closed-lid battery mode \(mode, privacy: .public); reason=\(reason, privacy: .public)")
             }
         case .pending(let token, let currentlyEnabled):
-            updateHelper(token: token, enabled: enabled)
+            updatePendingHelper(token: token, enabled: enabled)
             if currentlyEnabled != enabled {
                 let mode = enabled ? "pending armed" : "pending disarmed"
                 logger.notice("closed-lid battery mode \(mode, privacy: .public); reason=\(reason, privacy: .public)")
@@ -98,12 +104,28 @@ final class ClamshellSleepController {
         }
     }
 
-    private func updateHelper(token: String, enabled: Bool) {
+    private func updateHelper(helper: HelperState, enabled: Bool) {
+        do {
+            try writeHeartbeat(token: helper.token, enabled: enabled)
+            switch state {
+            case .ready(let currentHelper, _) where currentHelper == helper:
+                state = .ready(helper, enabled)
+            case .pending(let currentToken, _) where currentToken == helper.token:
+                state = .pending(helper.token, enabled)
+            case .inactive, .pending, .ready:
+                break
+            }
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = "Closed-lid heartbeat failed: \(error.localizedDescription)"
+            logger.error("closed-lid heartbeat failed; error=\(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func updatePendingHelper(token: String, enabled: Bool) {
         do {
             try writeHeartbeat(token: token, enabled: enabled)
             switch state {
-            case .ready(let currentToken, _) where currentToken == token:
-                state = .ready(token, enabled)
             case .pending(let currentToken, _) where currentToken == token:
                 state = .pending(token, enabled)
             case .inactive, .pending, .ready:
@@ -132,18 +154,21 @@ final class ClamshellSleepController {
                 }
 
                 switch result {
-                case .success:
+                case .success(let helperPID):
                     guard case .pending(let currentToken, let desiredEnabled) = self.state,
                           currentToken == token else {
                         self.logger.notice("closed-lid battery mode authorization finished after release")
                         return
                     }
 
-                    self.state = .ready(token, desiredEnabled)
+                    let helper = HelperState(token: token, pid: helperPID)
+                    self.state = .ready(helper, desiredEnabled)
                     self.nextAuthorizationAttemptDate = nil
                     self.lastErrorDescription = nil
                     let mode = desiredEnabled ? "armed" : "ready"
-                    self.logger.notice("closed-lid battery mode \(mode, privacy: .public); reason=\(reason, privacy: .public)")
+                    self.logger.notice(
+                        "closed-lid battery mode \(mode, privacy: .public); helperPID=\(helperPID, privacy: .public) reason=\(reason, privacy: .public)"
+                    )
                 case .failure(let error):
                     guard case .pending(let currentToken, _) = self.state,
                           currentToken == token else {
@@ -163,6 +188,53 @@ final class ClamshellSleepController {
         }
     }
 
+    private func helperIsHealthy(_ helper: HelperState) -> Bool {
+        guard isProcessAlive(pid: helper.pid),
+              let heartbeat = currentHeartbeat(),
+              heartbeat.token == helper.token,
+              heartbeat.age <= TimeInterval(heartbeatTimeoutSeconds) else {
+            return false
+        }
+
+        return true
+    }
+
+    private func markHelperLost(_ helper: HelperState, enabled: Bool, reason: String) {
+        state = .inactive
+        try? FileManager.default.removeItem(at: heartbeatURL)
+        lastErrorDescription = nil
+        logger.notice(
+            "closed-lid battery helper missing; helperPID=\(helper.pid, privacy: .public) restarting=\(enabled ? "yes" : "no", privacy: .public) reason=\(reason, privacy: .public)"
+        )
+
+        if enabled {
+            startHelper(reason: reason)
+        }
+    }
+
+    private func currentHeartbeat() -> Heartbeat? {
+        guard let contents = try? String(contentsOf: heartbeatURL, encoding: .utf8),
+              let token = contents.split(separator: "\n", omittingEmptySubsequences: false).first,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: heartbeatURL.path),
+              let modificationDate = attributes[.modificationDate] as? Date else {
+            return nil
+        }
+
+        return Heartbeat(token: String(token), age: Date().timeIntervalSince(modificationDate))
+    }
+
+    private func isProcessAlive(pid: pid_t) -> Bool {
+        guard pid > 0 else {
+            return false
+        }
+
+        if kill(pid, 0) == 0 {
+            return true
+        }
+
+        return errno == EPERM
+    }
+
     private func writeHeartbeat(token: String, enabled: Bool) throws {
         let mode = enabled ? "enabled" : "disabled"
         let contents = "\(token)\n\(mode)\n"
@@ -176,7 +248,7 @@ final class ClamshellSleepController {
         )
     }
 
-    private func runPrivilegedHelperScript(token: String) throws {
+    private func runPrivilegedHelperScript(token: String) throws -> pid_t {
         let script = shellScript(token: token)
         let prompt = "Close Your Laptop needs administrator approval to manage closed-lid sleep while Claude or Codex is actively working."
         let appleScript = "do shell script \(appleScriptLiteral(script)) with administrator privileges with prompt \(appleScriptLiteral(prompt))"
@@ -196,12 +268,21 @@ final class ClamshellSleepController {
         try process.run()
         process.waitUntilExit()
 
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let message = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
         guard process.terminationStatus == 0 else {
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
             throw ClamshellSleepError.privilegedCommandFailed(message ?? "osascript exited \(process.terminationStatus)")
         }
+
+        guard let message,
+              let helperPID = pid_t(message),
+              helperPID > 0 else {
+            throw ClamshellSleepError.invalidHelperPID(message ?? "missing helper pid")
+        }
+
+        return helperPID
     }
 
     private func setAuthorizationProcess(_ process: Process) {
@@ -277,6 +358,7 @@ final class ClamshellSleepController {
             /bin/sleep "$interval"
           done
         ) >/dev/null 2>&1 &
+        echo $!
         """
     }
 
@@ -292,19 +374,32 @@ final class ClamshellSleepController {
     }
 }
 
+private struct HelperState: Equatable {
+    let token: String
+    let pid: pid_t
+}
+
+private struct Heartbeat {
+    let token: String
+    let age: TimeInterval
+}
+
 private enum State: Equatable {
     case inactive
     case pending(String, Bool)
-    case ready(String, Bool)
+    case ready(HelperState, Bool)
 }
 
 private enum ClamshellSleepError: LocalizedError {
     case privilegedCommandFailed(String)
+    case invalidHelperPID(String)
 
     var errorDescription: String? {
         switch self {
         case .privilegedCommandFailed(let message):
             return message.isEmpty ? "administrator approval was not granted" : message
+        case .invalidHelperPID(let message):
+            return "closed-lid helper did not report a valid process id: \(message)"
         }
     }
 }
