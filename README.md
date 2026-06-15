@@ -61,6 +61,7 @@ Close Your Laptop can run as an ephemeral helper instead of a permanent menu-bar
 - Terminal workflows can use lightweight `codex` and `claude` wrappers that mark a CLI session, start the app, and remove the session marker when the command exits.
 - GUI workflows can use a tiny LaunchAgent watcher that listens for Claude Desktop and Codex Desktop launch events, then starts the main app.
 - The watcher does not scan processes, hold power assertions, use Sparkle, or ask for administrator approval.
+- Closed-lid battery sleep uses a separate privileged helper. Install or update it explicitly from Preferences; the main app only writes heartbeats, so app launches do not ask for the administrator password.
 - The main app still owns all sleep decisions and quits itself after Claude/Codex apps, CLI sessions, active workers, and grace periods are gone.
 
 Local setup helpers:
@@ -84,11 +85,13 @@ The menu bar item shows:
 - `Awake` when Close Your Laptop is holding sleep assertions
 - `Sleep OK` when macOS is free to sleep
 
-The menu includes the current assertion state, detected Claude/Codex sessions, a monitoring toggle, refresh, Sparkle update check, and quit.
+The menu includes the current assertion state, detected Claude/Codex sessions, a monitoring toggle, refresh, preferences, Sparkle update check, and quit.
+
+Preferences include power-user controls for the menu bar icon size, status text visibility, monitoring, watcher status, closed-lid helper install/update state, update feed diagnostics, and copying a compact diagnostic snapshot.
 
 ## Automatic Updates
 
-Close Your Laptop uses [Sparkle](https://sparkle-project.org/) for updates. The app checks a GitHub-hosted appcast in the background and shows Sparkle's standard update prompt when a newer signed release is available. The menu also includes `Check for Updates...` for a manual Sparkle check.
+Close Your Laptop uses [Sparkle](https://sparkle-project.org/) for updates. The app checks a GitHub-hosted appcast in the background and shows Sparkle's standard update prompt when a newer signed release is available. The menu also includes `Check for Updates...` for a manual Sparkle check; manual checks first verify that the appcast URL is reachable so a missing feed reports the HTTP failure directly.
 
 Updates are not silently installed. The user can install or skip an offered version; if a newer version is published later, Sparkle can prompt again. Release summaries come from the appcast item so the update prompt explains what changed.
 
@@ -109,11 +112,13 @@ swift test
 ./script/build_and_run.sh
 ```
 
-The build script stages a local app bundle at:
+The build script stages a local app bundle outside File Provider-backed folders by default so macOS code signing can verify the bundle without synthetic Finder metadata:
 
 ```text
-dist/Close Your Laptop.app
+${TMPDIR}/close-your-laptop-dist/Close Your Laptop.app
 ```
+
+Set `CYL_DIST_DIR` if you need a different staging directory.
 
 The app icon is generated from:
 

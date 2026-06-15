@@ -371,6 +371,30 @@ final class AgentDetectorTests: XCTestCase {
         XCTAssertEqual(report.sessions[0].descendants.map(\.pid), [527])
     }
 
+    func testDetectsLowButMeasurableClaudeDesktopLocalAgentProcess() {
+        let claudeApp = ProcessSnapshot(
+            pid: 528,
+            parentPID: 1,
+            cpuPercent: 0,
+            state: "S",
+            command: "/Applications/Claude.app/Contents/MacOS/Claude"
+        )
+        let localAgent = ProcessSnapshot(
+            pid: 529,
+            parentPID: 528,
+            cpuPercent: 0.14,
+            state: "S",
+            command: "/Users/me/Library/Application Support/Claude/claude-code/2.1.170/claude.app/Contents/MacOS/claude --output-format stream-json --permission-mode auto"
+        )
+
+        let report = AgentDetector.report(from: [claudeApp, localAgent], selfPID: 999)
+
+        XCTAssertTrue(report.isActive)
+        XCTAssertEqual(report.sessions.count, 1)
+        XCTAssertEqual(report.sessions[0].kind, .claude)
+        XCTAssertEqual(report.sessions[0].descendants.map(\.pid), [529])
+    }
+
     func testIncludesChildProcessesInSession() {
         let codex = ProcessSnapshot(
             pid: 400,

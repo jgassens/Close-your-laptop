@@ -6,6 +6,7 @@ EXTRA_ARGS=("${@:2}")
 APP_NAME="Close Your Laptop"
 PRODUCT_NAME="CloseYourLaptop"
 WATCHER_PRODUCT_NAME="CloseYourLaptopWatcher"
+CLAMSHELL_HELPER_PRODUCT_NAME="CloseYourLaptopClamshellHelper"
 BUNDLE_ID="com.gassensmith.closeyourlaptop"
 MIN_SYSTEM_VERSION="13.0"
 CONFIGURATION="release"
@@ -29,7 +30,7 @@ if [[ "$MODE" == "--debug" || "$MODE" == "debug" ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST_DIR="${CYL_DIST_DIR:-$ROOT_DIR/dist}"
+DIST_DIR="${CYL_DIST_DIR:-${TMPDIR:-/tmp}/close-your-laptop-dist}"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
@@ -37,6 +38,7 @@ APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$PRODUCT_NAME"
 WATCHER_BINARY="$APP_RESOURCES/$WATCHER_PRODUCT_NAME"
+CLAMSHELL_HELPER_BINARY="$APP_RESOURCES/$CLAMSHELL_HELPER_PRODUCT_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
 
@@ -50,9 +52,11 @@ esac
 
 swift build -c "$CONFIGURATION" --product "$PRODUCT_NAME"
 swift build -c "$CONFIGURATION" --product "$WATCHER_PRODUCT_NAME"
+swift build -c "$CONFIGURATION" --product "$CLAMSHELL_HELPER_PRODUCT_NAME"
 BUILD_BIN_PATH="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 BUILD_BINARY="$BUILD_BIN_PATH/$PRODUCT_NAME"
 BUILD_WATCHER_BINARY="$BUILD_BIN_PATH/$WATCHER_PRODUCT_NAME"
+BUILD_CLAMSHELL_HELPER_BINARY="$BUILD_BIN_PATH/$CLAMSHELL_HELPER_PRODUCT_NAME"
 SPARKLE_FRAMEWORK_SOURCE="$(find "$ROOT_DIR/.build/artifacts/sparkle/Sparkle" -path '*/macos-arm64_x86_64/Sparkle.framework' -type d | head -n 1)"
 
 if [[ -z "$SPARKLE_FRAMEWORK_SOURCE" ]]; then
@@ -70,6 +74,8 @@ cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 /usr/bin/ditto --noextattr --noqtn --norsrc "$BUILD_WATCHER_BINARY" "$WATCHER_BINARY"
 chmod +x "$WATCHER_BINARY"
+/usr/bin/ditto --noextattr --noqtn --norsrc "$BUILD_CLAMSHELL_HELPER_BINARY" "$CLAMSHELL_HELPER_BINARY"
+chmod +x "$CLAMSHELL_HELPER_BINARY"
 /usr/bin/ditto --noextattr --noqtn --norsrc "$SPARKLE_FRAMEWORK_SOURCE" "$APP_FRAMEWORKS/Sparkle.framework"
 /usr/bin/ditto --noextattr --noqtn --norsrc "$APP_ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
 
@@ -134,6 +140,7 @@ if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
 fi
 
 /usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$WATCHER_BINARY"
+/usr/bin/codesign "${CODESIGN_FLAGS[@]}" "$CLAMSHELL_HELPER_BINARY"
 APP_CODESIGN_FLAGS=(--force --sign "$CODESIGN_IDENTITY")
 if [[ "${CYL_HARDENED_RUNTIME:-0}" == "1" ]]; then
   APP_CODESIGN_FLAGS+=(--options runtime)

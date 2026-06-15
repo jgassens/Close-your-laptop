@@ -19,16 +19,17 @@ Do not steer the product toward an AC-power-only clamshell workflow. Being plugg
 ## Power Behavior
 
 - Hold native IOKit sleep assertions only while active Claude/Codex work is detected, plus the short release grace period.
-- Ordinary IOKit assertions do not reliably prevent battery clamshell sleep. After one administrator approval, keep a tiny privileged watchdog alive for the app run; it should arm the temporary `pmset disablesleep` closed-lid override only during active work and disarm it when work stops. Keep the root watchdog/heartbeat safety path intact so a crash restores normal sleep.
+- Ordinary IOKit assertions do not reliably prevent battery clamshell sleep. After one explicit administrator approval, install a tiny privileged closed-lid helper that owns `pmset disablesleep`; the main app should only write desired armed/disarmed heartbeats. Do not launch per-app-run AppleScript administrator prompts from the main app.
 - Release assertions promptly when work stops.
 - After wake, reset CPU measurement history and keep any pre-sleep assertion alive briefly while revalidating activity. Sleep time must not consume the release grace window or cause a false `Sleep OK`.
-- Keep the app small, quiet, and low-overhead: native process APIs, sparse polling, no Accessibility permission for normal detection, no shelling out in the monitor loop. Privileged `pmset` work belongs in the already-approved watchdog, not repeated AppleScript authorization prompts.
+- Keep the app small, quiet, and low-overhead: native process APIs, sparse polling, no Accessibility permission for normal detection, no shelling out in the monitor loop. Privileged `pmset` work belongs in the stable privileged helper, not repeated AppleScript authorization prompts.
 - Keep diagnostics sparse and useful. Unified-log events should cover activity transitions, assertion acquire/release, and sleep/wake notifications so closed-lid battery tests can be audited after wake.
 
 ## Runtime Shape
 
 - Keep the main menu app authoritative for power behavior. Watchers and wrappers may wake it or mark sessions, but they must not directly kill it or force-release assertions.
 - The GUI launch watcher should remain a tiny user LaunchAgent: listen for Claude/Codex bundle IDs with `NSWorkspace`, start the main app, and do no process scanning, Sparkle work, power assertions, or privileged `pmset`.
+- The privileged closed-lid helper should remain narrow and rarely updated: read the main app heartbeat, arm/disarm `pmset disablesleep`, and fail safe by disarming when the heartbeat is stale or missing.
 - When the main app is running with no watched GUI app, no CLI token, no active worker process, no grace period, and no assertion held, it should quit itself after a short idle delay.
 - Preserve the three refresh tiers when the main app is alive: active work at the fast interval, open-but-idle GUI apps at the idle interval, and dormant fallback checks at the slow interval.
 

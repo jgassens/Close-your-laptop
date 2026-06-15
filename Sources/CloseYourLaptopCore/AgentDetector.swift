@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AgentDetector {
-    private static let minimumGUIActivityCPUPercent = 0.15
+    private static let minimumGUIActivityCPUPercent = 0.1
     private static let minimumReportedGUIProcessCPUPercent = 0.1
 
     public static func report(
@@ -26,7 +26,7 @@ public enum AgentDetector {
             let workDescendants = guiDescendants.filter { !isGUIInfrastructure($0) }
             let guiCPUPercent = workDescendants.reduce(0) { $0 + $1.cpuPercent }
 
-            guard guiCPUPercent >= minimumGUIActivityCPUPercent else {
+            guard guiCPUPercent > minimumGUIActivityCPUPercent else {
                 return nil
             }
 

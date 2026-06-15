@@ -8,7 +8,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let powerController = PowerAssertionController()
     private let updateController = UpdateController()
     private let watcherController = WatcherController()
+    private let clamshellHelperController = ClamshellHelperController()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private lazy var preferencesController = PreferencesWindowController(
+        onRefresh: { [weak self] in
+            self?.refresh()
+        },
+        onCheckForUpdates: { [weak self] in
+            self?.checkForUpdates()
+        },
+        onInstallClamshellHelper: { [weak self] in
+            self?.installClamshellHelper()
+        },
+        onUninstallClamshellHelper: { [weak self] in
+            self?.uninstallClamshellHelper()
+        },
+        diagnosticsProvider: { [weak self] in
+            self?.diagnosticsSummary() ?? "Close Your Laptop diagnostics are unavailable."
+        },
+        watcherStateProvider: { [weak self] in
+            self?.watcherController.installationState() ?? .notInstalled(canInstall: false)
+        },
+        clamshellHelperStateProvider: { [weak self] in
+            self?.clamshellHelperController.installationState() ?? .notInstalled(canInstall: false)
+        }
+    )
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "com.gassensmith.closeyourlaptop",
         category: "Power"
@@ -39,31 +63,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         "com.openai.codex",
         "com.anthropic.claudefordesktop"
     ]
-    private let monitoringKey = "monitoringEnabled"
 
     private var automaticQuitEnabled: Bool {
         ProcessInfo.processInfo.environment["CYL_DISABLE_AUTO_QUIT"] != "1"
     }
 
-    private lazy var awakeImage = templateImage(named: "bolt.fill", accessibilityDescription: "Keeping Mac awake")
-    private lazy var sleepImage = templateImage(named: "moon.zzz", accessibilityDescription: "Allowing sleep")
-
     private var monitoringEnabled: Bool {
-        get {
-            if UserDefaults.standard.object(forKey: monitoringKey) == nil {
-                return true
-            }
-            return UserDefaults.standard.bool(forKey: monitoringKey)
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: monitoringKey)
-        }
+        get { AppPreferences.monitoringEnabled }
+        set { AppPreferences.monitoringEnabled = newValue }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        AppPreferences.registerDefaults()
         logger.notice("app launched")
+
+        if terminateDuplicateInstanceIfNeeded() {
+            return
+        }
+
         updateController.start()
+        configurePreferenceNotifications()
         configureWorkspaceNotifications()
         configureStatusItem()
         primeCPUHistoryThenRefresh()
@@ -72,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         logger.notice("app terminating; releasing sleep assertions")
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
         timer?.invalidate()
         powerController.releaseAll()
     }
@@ -80,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitoringEnabled.toggle()
         let state = monitoringEnabled ? "enabled" : "disabled"
         logger.notice("monitoring \(state, privacy: .public)")
-        refresh()
+        NotificationCenter.default.post(name: AppPreferences.didChangeNotification, object: self)
     }
 
     @objc private func refreshFromMenu() {
@@ -89,9 +110,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func checkForUpdates() {
-        if let problem = updateController.checkForUpdates() {
-            showAlert(title: "Could Not Check for Updates", message: problem)
+        updateController.checkForUpdates { [weak self] problem in
+            self?.showAlert(title: "Could Not Check for Updates", message: problem)
         }
+    }
+
+    @objc private func openPreferences() {
+        logger.info("preferences requested")
+        preferencesController.showWindow(nil)
     }
 
     @objc private func installTinyPersistentWatcher() {
@@ -139,14 +165,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func installClamshellHelper() {
+        do {
+            try clamshellHelperController.install()
+            logger.notice("closed-lid helper installed")
+            showAlert(
+                title: "Closed-Lid Helper Installed",
+                message: "Close Your Laptop can now manage closed-lid battery sleep without asking for administrator approval on every app launch."
+            )
+            refresh()
+        } catch {
+            logger.error("closed-lid helper install failed; error=\(error.localizedDescription, privacy: .public)")
+            showAlert(title: "Could Not Install Closed-Lid Helper", message: error.localizedDescription)
+        }
+    }
+
+    private func uninstallClamshellHelper() {
+        do {
+            try clamshellHelperController.uninstall()
+            logger.notice("closed-lid helper uninstalled")
+            showAlert(
+                title: "Closed-Lid Helper Uninstalled",
+                message: "Close Your Laptop will still hold ordinary sleep assertions, but closed-lid battery mode will not be managed."
+            )
+            refresh()
+        } catch {
+            logger.error("closed-lid helper uninstall failed; error=\(error.localizedDescription, privacy: .public)")
+            showAlert(title: "Could Not Uninstall Closed-Lid Helper", message: error.localizedDescription)
+        }
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
 
+    private func terminateDuplicateInstanceIfNeeded() -> Bool {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            return false
+        }
+
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let duplicate = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .contains { $0.processIdentifier != currentPID && !$0.isTerminated }
+
+        if duplicate {
+            logger.notice("duplicate app instance detected; terminating this instance")
+            NSApp.terminate(nil)
+        }
+
+        return duplicate
+    }
+
     private func configureStatusItem() {
         statusItem.button?.target = self
-        statusItem.button?.imagePosition = .imageLeading
         statusItem.button?.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    }
+
+    private func configurePreferenceNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(preferencesDidChange),
+            name: AppPreferences.didChangeNotification,
+            object: nil
+        )
     }
 
     private func configureWorkspaceNotifications() {
@@ -175,6 +257,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWorkspace.didTerminateApplicationNotification,
             object: nil
         )
+    }
+
+    @objc private func preferencesDidChange(_ notification: Notification) {
+        lastRenderedState = nil
+        refresh()
     }
 
     private func primeCPUHistoryThenRefresh() {
@@ -349,14 +436,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         lastRenderedState = state
-        statusItem.button?.image = state.isHoldingAssertions ? awakeImage : sleepImage
-        statusItem.button?.title = state.isHoldingAssertions ? "Awake" : "Sleep OK"
+        setStatusPresentation(
+            imageName: state.isHoldingAssertions ? "bolt.fill" : "moon.zzz",
+            title: state.isHoldingAssertions ? "Awake" : "Sleep OK",
+            accessibilityDescription: state.isHoldingAssertions ? "Keeping Mac awake" : "Allowing sleep"
+        )
         statusItem.menu = buildMenu(from: state)
     }
 
     private func renderCheckingState() {
-        statusItem.button?.image = sleepImage
-        statusItem.button?.title = "Checking"
+        setStatusPresentation(
+            imageName: "moon.zzz",
+            title: "Checking",
+            accessibilityDescription: "Checking Claude and Codex activity"
+        )
 
         let menu = NSMenu()
         addDisabledItem(title: "Checking Claude/Codex activity.", to: menu)
@@ -431,6 +524,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshItem.target = self
         menu.addItem(refreshItem)
 
+        let preferencesItem = NSMenuItem(
+            title: "Preferences...",
+            action: #selector(openPreferences),
+            keyEquivalent: ","
+        )
+        preferencesItem.target = self
+        menu.addItem(preferencesItem)
+
         let updateItem = NSMenuItem(
             title: "Check for Updates...",
             action: #selector(checkForUpdates),
@@ -489,10 +590,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    private func setStatusPresentation(
+        imageName: String,
+        title: String,
+        accessibilityDescription: String
+    ) {
+        statusItem.length = AppPreferences.showMenuBarStatusText ? NSStatusItem.variableLength : NSStatusItem.squareLength
+        statusItem.button?.imagePosition = AppPreferences.showMenuBarStatusText ? .imageLeading : .imageOnly
+        statusItem.button?.image = templateImage(named: imageName, accessibilityDescription: accessibilityDescription)
+        statusItem.button?.title = AppPreferences.showMenuBarStatusText ? title : ""
+        statusItem.button?.toolTip = title
+    }
+
     private func templateImage(named name: String, accessibilityDescription: String) -> NSImage? {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibilityDescription)
+            .flatMap {
+                $0.withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(pointSize: AppPreferences.menuBarIconSize.pointSize, weight: .regular)
+                )
+            }
         image?.isTemplate = true
         return image
+    }
+
+    private func diagnosticsSummary() -> String {
+        let diagnostics = UpdateDiagnostics.current()
+        return [
+            "Close Your Laptop diagnostics",
+            "bundle: \(diagnostics.bundlePath)",
+            "version: \(diagnostics.version ?? "missing")",
+            "build: \(diagnostics.build ?? "missing")",
+            "monitoring: \(monitoringEnabled ? "enabled" : "disabled")",
+            "menu bar icon: \(AppPreferences.menuBarIconSize.displayName)",
+            "menu bar text: \(AppPreferences.showMenuBarStatusText ? "shown" : "hidden")",
+            "activity: \(activityLogState)",
+            "assertions held: \(powerController.isHoldingAssertions ? "yes" : "no")",
+            "clamshell: \(powerController.clamshellStatusLine ?? "inactive")",
+            "watcher: \(watcherController.installationState().diagnosticsSummary)",
+            "closed-lid helper: \(clamshellHelperController.installationState().diagnosticsSummary)",
+            "feed: \(diagnostics.feedURL ?? "missing")",
+            "public key: \(diagnostics.publicKey?.isEmpty == false ? "present" : "missing")",
+            "automatic checks: \(diagnostics.automaticChecksEnabled ? "enabled" : "disabled")",
+            "automatic downloads: \(diagnostics.automaticDownloadsAllowed ? "allowed" : "not allowed")",
+            "Sparkle.framework: \(diagnostics.sparkleFrameworkExists ? "present" : "missing")",
+            "Installer.xpc: \(diagnostics.sparkleInstallerExists ? "present" : "missing")"
+        ].joined(separator: "\n")
     }
 
     private var headline: String {
@@ -665,4 +807,30 @@ private struct RenderedState: Equatable {
     let clamshellLine: String?
     let watcherState: WatcherInstallationState
     let sessionLines: [String]
+}
+
+private extension WatcherInstallationState {
+    var diagnosticsSummary: String {
+        switch self {
+        case .notInstalled(let canInstall):
+            return canInstall ? "not installed; installable" : "not installed; app must be in Applications"
+        case .stale(let canUpdate):
+            return canUpdate ? "stale; updatable" : "stale; not updatable from this app"
+        case .current:
+            return "current"
+        }
+    }
+}
+
+private extension ClamshellHelperInstallationState {
+    var diagnosticsSummary: String {
+        switch self {
+        case .notInstalled(let canInstall):
+            return canInstall ? "not installed; installable" : "not installed; app must be in Applications"
+        case .stale(let canUpdate):
+            return canUpdate ? "stale; updatable" : "stale; not updatable from this app"
+        case .current:
+            return "current"
+        }
+    }
 }
